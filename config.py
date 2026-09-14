@@ -6,7 +6,10 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent
 # El archivo local del proyecto debe prevalecer sobre una variable heredada de Windows.
-load_dotenv(BASE_DIR / ".env", override=True)
+environment_file = Path(os.environ.get("ENV_FILE", BASE_DIR / ".env"))
+if not environment_file.is_absolute():
+    environment_file = BASE_DIR / environment_file
+load_dotenv(environment_file, override=True)
 
 
 class Config:
@@ -27,11 +30,14 @@ class Config:
             port=int(os.environ.get("DB_PORT", "1433")),
             database=os.environ.get("DB_NAME", "ReportesMantencion"),
             query={"driver": os.environ.get("DB_DRIVER", "ODBC Driver 18 for SQL Server"),
-                   "TrustServerCertificate": "yes", "Encrypt": "no"},
+                   "TrustServerCertificate": os.environ.get("DB_TRUST_SERVER_CERTIFICATE", "yes"),
+                   "Encrypt": os.environ.get("DB_ENCRYPT", "no")},
         )
     else:
         SQLALCHEMY_DATABASE_URI = os.environ.get("DATABASE_URL")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    # Evita reutilizar conexiones cerradas después de una pausa de Azure SQL Serverless.
+    SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True, "pool_recycle": 1800}
     UPLOAD_FOLDER = Path(os.environ.get("UPLOAD_FOLDER", BASE_DIR / "uploads")).resolve()
     MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", 25 * 1024 * 1024))
     SESSION_COOKIE_HTTPONLY = True

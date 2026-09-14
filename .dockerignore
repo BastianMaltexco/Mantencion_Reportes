@@ -1,0 +1,17 @@
+.git
+.venv
+venv
+env
+__pycache__
+*.py[cod]
+*.log
+.env
+.env.*
+!.env.example
+uploads
+*.xlsx
+*.xls
+*.csv
+*.pem
+*.key
+*.pfx

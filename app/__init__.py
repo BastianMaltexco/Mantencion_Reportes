@@ -82,6 +82,11 @@ def create_app(config_class=Config):
         flash("Los archivos exceden el límite permitido de 25 MB por reporte.", "error")
         return redirect(request.referrer or url_for("reports.create_report"))
 
+    @app.get("/healthz")
+    def healthz():
+        """Sonda liviana de Render; no requiere autenticación ni expone datos."""
+        return {"status": "ok"}, 200
+
     with app.app_context():
         # El esquema de produccion se aplica con script_db.sql. Esto facilita la primera prueba local.
         bootstrap_admin(app)
