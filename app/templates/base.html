@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Reportes Mantención{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config={theme:{extend:{colors:{brand:{500:'#2563eb',600:'#1d4ed8',700:'#1d4ed8'}}}}}</script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body class="min-h-screen bg-slate-50 text-slate-800">
+{% if session.get('user_id') %}
+<header class="border-b border-slate-200 bg-white print:hidden"><nav class="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
+  <a class="font-bold text-indigo-700" href="{{ url_for('reports.dashboard') }}">Reportes Mantención</a>
+  <div class="flex items-center gap-2 text-sm"><a class="rounded px-3 py-2 hover:bg-slate-100" href="{{ url_for('reports.dashboard') }}">Historial</a><a class="rounded px-3 py-2 hover:bg-slate-100" href="{{ url_for('reports.metrics_dashboard') }}">Dashboard</a><a class="rounded bg-brand-600 px-3 py-2 font-medium text-white hover:bg-brand-700" href="{{ url_for('reports.choose_report') }}">Nuevo reporte</a>
+  {% if session.get('role') == 'Administrador' %}<a class="rounded px-3 py-2 hover:bg-slate-100" href="{{ url_for('auth.users') }}">Usuarios</a>{% endif %}
+  <span class="hidden border-l pl-3 text-slate-500 sm:inline">{{ session.get('user_name') }}</span><form method="post" action="{{ url_for('auth.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="rounded px-2 py-2 text-slate-600 hover:bg-slate-100">Salir</button></form></div>
+</nav></header>
+{% endif %}
+<main class="mx-auto max-w-7xl px-4 py-6 sm:px-6">{% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="mb-4 rounded-lg border px-4 py-3 {{ 'border-red-200 bg-red-50 text-red-800' if category == 'error' else 'border-blue-200 bg-blue-50 text-blue-800' }}">{{ message }}</div>{% endfor %}{% endwith %}{% block content %}{% endblock %}</main>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body></html>

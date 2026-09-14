@@ -1,0 +1,15 @@
+@media print { header, .print\\:hidden { display:none!important } body, main { background:#fff!important; padding:0!important } }
+.label { font-size:.72rem; font-weight:700; letter-spacing:.05em; color:#64748b; }
+
+/* Dashboard compacto para escritorio a zoom 100%. */
+#dateChart, #serviceChart, #userChart, #machineChart {
+  height: 170px !important;
+  max-height: 170px !important;
+}
+
+@media (min-width: 1280px) {
+  #dateChart, #serviceChart, #userChart, #machineChart {
+    height: 155px !important;
+    max-height: 155px !important;
+  }
+}
