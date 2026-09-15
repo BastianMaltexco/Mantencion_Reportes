@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import '../../features/auth/presentation/auth_controller.dart';
 import '../../features/auth/presentation/login_page.dart';
 import '../../features/home/presentation/home_page.dart';
+import '../../features/history/presentation/report_detail_page.dart';
+import '../../features/history/presentation/report_history_page.dart';
 import '../../features/reports/presentation/create_maintenance_report_page.dart';
 
 final appRouterProvider = Provider<GoRouter>(
@@ -16,6 +18,15 @@ final appRouterProvider = Provider<GoRouter>(
       GoRoute(
         path: '/reports/new',
         builder: (context, _) => const CreateMaintenanceReportPage(),
+      ),
+      GoRoute(
+        path: '/reports',
+        builder: (context, _) => const ReportHistoryPage(),
+      ),
+      GoRoute(
+        path: '/reports/:id',
+        builder: (context, state) =>
+            ReportDetailPage(reportId: int.parse(state.pathParameters['id']!)),
       ),
     ],
   ),

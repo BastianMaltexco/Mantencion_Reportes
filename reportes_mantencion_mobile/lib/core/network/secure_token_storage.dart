@@ -7,9 +7,20 @@ class SessionTokens {
   final String refreshToken;
 }
 
+/// Contrato mínimo del almacén cifrado que usa el cliente HTTP.
+///
+/// Separarlo de la implementación permite verificar que las solicitudes de
+/// adjuntos usan y renuevan el JWT sin reemplazar el almacenamiento seguro en
+/// producción.
+abstract interface class TokenStorage {
+  Future<SessionTokens?> read();
+  Future<void> save(SessionTokens tokens);
+  Future<void> clear();
+}
+
 /// Wrapper central para impedir que los tokens terminen en SharedPreferences
 /// convencionales, archivos de configuración o registros de depuración.
-class SecureTokenStorage {
+class SecureTokenStorage implements TokenStorage {
   SecureTokenStorage({FlutterSecureStorage? storage})
     : _storage =
           storage ??
@@ -27,6 +38,7 @@ class SecureTokenStorage {
   static const _refreshKey = 'reportes_refresh_token';
   final FlutterSecureStorage _storage;
 
+  @override
   Future<SessionTokens?> read() async {
     final access = await _storage.read(key: _accessKey);
     final refresh = await _storage.read(key: _refreshKey);
@@ -39,10 +51,12 @@ class SecureTokenStorage {
     return SessionTokens(accessToken: access, refreshToken: refresh);
   }
 
+  @override
   Future<void> save(SessionTokens tokens) async {
     await _storage.write(key: _accessKey, value: tokens.accessToken);
     await _storage.write(key: _refreshKey, value: tokens.refreshToken);
   }
 
+  @override
   Future<void> clear() => _storage.deleteAll();
 }

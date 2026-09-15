@@ -12,15 +12,20 @@ class ApiClient {
     this._tokenStorage,
     this._onSessionExpired, {
     required AppConfig config,
-  }) : _refreshDio = Dio(BaseOptions(baseUrl: config.apiBaseUrl)) {
-    _dio = Dio(
-      BaseOptions(
-        baseUrl: config.apiBaseUrl,
-        connectTimeout: const Duration(seconds: 20),
-        receiveTimeout: const Duration(seconds: 30),
-        headers: const {'Accept': 'application/json'},
-      ),
-    );
+    Dio? dio,
+    Dio? refreshDio,
+  }) : _refreshDio =
+           refreshDio ?? Dio(BaseOptions(baseUrl: config.apiBaseUrl)) {
+    _dio =
+        dio ??
+        Dio(
+          BaseOptions(
+            baseUrl: config.apiBaseUrl,
+            connectTimeout: const Duration(seconds: 20),
+            receiveTimeout: const Duration(seconds: 30),
+            headers: const {'Accept': 'application/json'},
+          ),
+        );
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
@@ -56,7 +61,7 @@ class ApiClient {
 
   late final Dio _dio;
   final Dio _refreshDio;
-  final SecureTokenStorage _tokenStorage;
+  final TokenStorage _tokenStorage;
   final void Function() _onSessionExpired;
   Future<bool>? _refreshOperation;
 

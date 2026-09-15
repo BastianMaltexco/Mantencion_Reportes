@@ -47,6 +47,11 @@ class _HomePageState extends ConsumerState<HomePage> {
         title: const Text('Reportes Mantención'),
         actions: [
           IconButton(
+            tooltip: 'Historial de reportes',
+            icon: const Icon(Icons.history),
+            onPressed: () => context.push('/reports'),
+          ),
+          IconButton(
             tooltip: 'Cerrar sesión',
             icon: const Icon(Icons.logout),
             onPressed: () async {
