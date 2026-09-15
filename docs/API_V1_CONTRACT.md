@@ -86,10 +86,25 @@ Administradores pueden consultar todos y filtrar por `technician_id`.
 | `GET /fuel-loads/{id}` | Carga y dos generadores con evidencia registrada. |
 | `GET /attachments/{id}` | Descarga privada de un adjunto autorizado. |
 | `GET /fuel-loads/{id}/generators/{number}/images/{water|oil}` | Descarga privada de una foto autorizada. |
+| `GET /dashboard/summary` | Agregaciones autorizadas para Dashboard móvil. |
 
 `page` comienza en 1 y `page_size` va de 1 a 100 (25 por defecto). Las listas
 devuelven `pagination: {page, page_size, total, total_pages}`. Las fechas de
 filtro usan ISO-8601; una fecha sin hora en `date_to` incluye el día completo.
+
+## Dashboard - implementado
+
+`GET /dashboard/summary` calcula en SQL/Flask los totales, días activos,
+series diarias, distribuciones por área/sección/maquinaria/servicio y actividad
+cronológica paginada. Acepta `date_from`, `date_to`, `technician_id`,
+`area_id`, `section_id`, `machinery_id`, `service_type`,
+`record_type=all|maintenance|fuel`, `activity_page` y `activity_page_size`.
+
+Área, sección y maquinaria se validan como jerarquía. Las cargas de petróleo
+no tienen esas relaciones: esos filtros y distribuciones aplican solo a
+mantención. Administradores pueden filtrar técnicos; un Técnico queda forzado
+por Flask a sus propios registros y un `technician_id` ajeno recibe
+`403 insufficient_role`.
 
 ## Creación - implementado
 

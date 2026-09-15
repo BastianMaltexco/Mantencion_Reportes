@@ -46,20 +46,13 @@ void main() {
     },
   );
 
-  testWidgets(
-    'selección de historial y dashboard inicia con filtros cerrados',
-    (tester) async {
-      await tester.pumpWidget(
-        const ProviderScope(child: MaterialApp(home: HistoryPage())),
-      );
-      expect(find.text('Filtros'), findsOneWidget);
-      expect(find.textContaining('Los filtros se mantendrán'), findsNothing);
-
-      await tester.pumpWidget(
-        const ProviderScope(child: MaterialApp(home: DashboardPage())),
-      );
-      expect(find.text('Filtros'), findsOneWidget);
-      expect(find.textContaining('Los filtros se mantendrán'), findsNothing);
-    },
-  );
+  testWidgets('selección de historial inicia con filtros cerrados', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const ProviderScope(child: MaterialApp(home: HistoryPage())),
+    );
+    expect(find.text('Filtros'), findsOneWidget);
+    expect(find.textContaining('Los filtros se mantendrán'), findsNothing);
+  });
 }

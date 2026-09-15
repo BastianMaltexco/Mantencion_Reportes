@@ -211,6 +211,36 @@ def test_multipart_checklist_evidence_and_fuel_loads(client):
     assert client.post("/api/v1/fuel-loads", json=invalid_fuel, headers=headers).status_code == 422
 
 
+def test_dashboard_summary_aggregates_in_server_and_enforces_technician_scope(client):
+    admin_headers = auth_headers(client)
+    created_report = client.post("/api/v1/reports", json=report_payload(), headers=admin_headers)
+    assert created_report.status_code == 201
+    fuel_payload = {
+        "loaded_at": "2026-09-14T10:30:00-03:00", "observations": "Carga de prueba",
+        "generators": [{"number": 1, "liters": 10, "hourmeter": 1}, {"number": 2, "liters": 20, "hourmeter": 2}],
+    }
+    images = {"payload": json.dumps(fuel_payload)}
+    for name in ("water_1", "oil_1", "water_2", "oil_2"):
+        images[name] = (io.BytesIO(b"png"), f"{name}.png")
+    assert client.post("/api/v1/fuel-loads", headers=admin_headers, data=images, content_type="multipart/form-data").status_code == 201
+
+    summary = client.get("/api/v1/dashboard/summary?record_type=all&activity_page=1&activity_page_size=10", headers=admin_headers)
+    assert summary.status_code == 200
+    data = summary.get_json()["data"]
+    assert data["summary"] == {"total_records": 2, "maintenance_reports": 1, "fuel_loads": 1, "activity_days": 1}
+    assert {item["record_type"] for item in data["activity"]} == {"maintenance", "fuel"}
+    assert data["charts"]["areas"] == [{"id": 1, "name": "Malta", "count": 1}]
+    assert {item["id"] for item in data["technicians"]} == {1, 2}
+
+    tech_headers = auth_headers(client, "tech@example.test")
+    forbidden = client.get("/api/v1/dashboard/summary?technician_id=1", headers=tech_headers)
+    assert forbidden.status_code == 403
+    assert forbidden.get_json()["error"]["code"] == "insufficient_role"
+    own = client.get("/api/v1/dashboard/summary?technician_id=2", headers=tech_headers)
+    assert own.status_code == 200
+    assert own.get_json()["data"]["summary"]["total_records"] == 0
+
+
 def test_existing_web_forms_continue_to_use_the_shared_rules(client):
     client.get("/auth/login")
     with client.session_transaction() as session:

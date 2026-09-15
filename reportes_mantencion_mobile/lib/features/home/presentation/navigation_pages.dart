@@ -49,40 +49,6 @@ class HistoryPage extends StatelessWidget {
   );
 }
 
-class DashboardPage extends StatelessWidget {
-  const DashboardPage({super.key});
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Dashboard')),
-    body: SafeArea(
-      child: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          const _CollapsedFilters(),
-          const SizedBox(height: 24),
-          Icon(
-            Icons.dashboard_outlined,
-            size: 54,
-            color: Theme.of(context).colorScheme.primary,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Dashboard móvil',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Este espacio está preparado para incorporar indicadores reales en una próxima etapa.',
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
 class UsersPage extends ConsumerWidget {
   const UsersPage({super.key});
 

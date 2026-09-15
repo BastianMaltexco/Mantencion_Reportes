@@ -1,0 +1,26 @@
+openapi: 3.0.3
+info:
+  title: Reportes Mantención API
+  version: v1
+paths:
+  /api/v1/dashboard/summary:
+    get:
+      summary: Dashboard agregado y autorizado
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: record_type, in: query, schema: { type: string, enum: [all, maintenance, fuel] } }
+        - { name: technician_id, in: query, schema: { type: integer } }
+        - { name: date_from, in: query, schema: { type: string, format: date-time } }
+        - { name: date_to, in: query, schema: { type: string, format: date-time } }
+        - { name: area_id, in: query, schema: { type: integer } }
+        - { name: section_id, in: query, schema: { type: integer } }
+        - { name: machinery_id, in: query, schema: { type: integer } }
+        - { name: service_type, in: query, schema: { type: string } }
+        - { name: activity_page, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: activity_page_size, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+      responses:
+        '200': { description: Resumen, gráficos y actividad paginada }
+        '403': { description: Técnico intenta consultar a otro usuario }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }

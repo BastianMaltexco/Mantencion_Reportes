@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/auth/presentation/auth_controller.dart';
 import '../../features/auth/presentation/login_page.dart';
+import '../../features/dashboard/presentation/dashboard_page.dart';
 import '../../features/fuel_loads/presentation/create_fuel_load_page.dart';
 import '../../features/fuel_loads/presentation/fuel_load_detail_page.dart';
 import '../../features/fuel_loads/presentation/fuel_load_history_page.dart';
@@ -26,7 +27,7 @@ final appRouterProvider = Provider<GoRouter>(
       GoRoute(path: '/history', builder: (context, _) => const HistoryPage()),
       GoRoute(
         path: '/dashboard',
-        builder: (context, _) => const DashboardPage(),
+        builder: (context, _) => const MobileDashboardPage(),
       ),
       GoRoute(path: '/users', builder: (context, _) => const UsersPage()),
       GoRoute(
