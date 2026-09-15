@@ -16,6 +16,9 @@ __pycache__/
 *.pem
 *.key
 *.pfx
+*.jks
+*.keystore
+key.properties
 *.xlsx
 *.xls
 *.csv
