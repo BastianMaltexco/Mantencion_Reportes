@@ -1,0 +1,240 @@
+from datetime import datetime, timezone
+import io
+import json
+from pathlib import Path
+import shutil
+
+import pytest
+from sqlalchemy import text
+from werkzeug.security import generate_password_hash
+
+from app import create_app, db
+from app.models import Area, Machinery, Section, User
+
+
+class TestConfig:
+    TESTING = True
+    SECRET_KEY = "web-test-secret"
+    API_TOKEN_SECRET = "api-test-secret-at-least-32-characters"
+    API_TOKEN_ISSUER = "reportes-test-api"
+    API_ACCESS_TOKEN_MINUTES = 15
+    API_REFRESH_TOKEN_DAYS = 30
+    SQLALCHEMY_DATABASE_URI = "sqlite://"
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_ENGINE_OPTIONS = {}
+    UPLOAD_FOLDER = Path("tests/.uploads")
+    FILE_STORAGE_BACKEND = "local"
+    AZURE_STORAGE_CONTAINER = "reportes-adjuntos"
+    MAX_CONTENT_LENGTH = 1024 * 1024
+    ADMIN_USERNAME = "unused@example.test"
+    ADMIN_PASSWORD = None
+
+
+@pytest.fixture()
+def client():
+    app = create_app(TestConfig)
+    with app.app_context():
+        # SQLite necesita adjuntar explícitamente el esquema dbo usado por SQL Server.
+        db.session.execute(text("ATTACH DATABASE ':memory:' AS dbo"))
+        raw_connection = db.session.connection().connection.driver_connection
+        raw_connection.create_function("getdate", 0, lambda: "2026-09-14 10:00:00")
+        raw_connection.create_function("sysdatetimeoffset", 0, lambda: "2026-09-14 10:00:00+00:00")
+        db.create_all()
+        db.session.add_all([
+            User(username="admin@example.test", full_name="Admin", password_hash=generate_password_hash("CorrectHorseBattery1"), role="Administrador", is_active=True, created_at=datetime.now(timezone.utc)),
+            User(username="tech@example.test", full_name="Tech", password_hash=generate_password_hash("CorrectHorseBattery1"), role="Técnico/Operativo", is_active=True, created_at=datetime.now(timezone.utc)),
+        ])
+        area = Area(name="Malta", is_active=True)
+        db.session.add(area)
+        db.session.flush()
+        section = Section(area_id=area.id, name="Despacho", is_active=True)
+        db.session.add(section)
+        db.session.flush()
+        db.session.add(Machinery(section_id=section.id, source_code=1, name="Soplador 1", is_active=True))
+        db.session.commit()
+        yield app.test_client()
+        db.session.remove()
+        db.drop_all()
+        shutil.rmtree(TestConfig.UPLOAD_FOLDER, ignore_errors=True)
+
+
+def login(client, username="admin@example.test"):
+    response = client.post("/api/v1/auth/login", json={"username": username, "password": "CorrectHorseBattery1"})
+    assert response.status_code == 200
+    return response.get_json()["data"]
+
+
+def test_login_me_refresh_rotation_and_logout(client):
+    tokens = login(client)
+    assert tokens["token_type"] == "Bearer"
+    assert "CorrectHorse" not in str(tokens)
+
+    me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {tokens['access_token']}"})
+    assert me.status_code == 200
+    assert me.get_json()["data"]["role"] == "Administrador"
+
+    refreshed = client.post("/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+    assert refreshed.status_code == 200
+    new_tokens = refreshed.get_json()["data"]
+    assert new_tokens["refresh_token"] != tokens["refresh_token"]
+
+    reused = client.post("/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+    assert reused.status_code == 401
+    assert reused.get_json()["error"]["code"] == "invalid_refresh_token"
+
+    logout = client.post("/api/v1/auth/logout", json={"refresh_token": new_tokens["refresh_token"]})
+    assert logout.status_code == 200
+    revoked = client.post("/api/v1/auth/refresh", json={"refresh_token": new_tokens["refresh_token"]})
+    assert revoked.status_code == 401
+
+
+def test_errors_and_roles_use_the_uniform_envelope(client):
+    bad_content_type = client.post("/api/v1/auth/login", data="{}")
+    assert bad_content_type.status_code == 415
+    assert bad_content_type.get_json()["error"]["code"] == "unsupported_media_type"
+
+    invalid = client.post("/api/v1/auth/login", json={"username": "admin@example.test", "password": "wrong"})
+    assert invalid.status_code == 401
+    assert invalid.get_json()["error"]["request_id"]
+
+    denied = client.get("/api/v1/admin/status", headers={"Authorization": f"Bearer {login(client, 'tech@example.test')['access_token']}"})
+    assert denied.status_code == 403
+    assert denied.get_json()["error"]["code"] == "insufficient_role"
+
+    allowed = client.get("/api/v1/admin/status", headers={"Authorization": f"Bearer {login(client)['access_token']}"})
+    assert allowed.status_code == 200
+
+    not_found = client.get("/api/v1/no-existe")
+    assert not_found.status_code == 404
+    assert not_found.get_json()["error"]["code"] == "not_found"
+
+    wrong_method = client.get("/api/v1/auth/login")
+    assert wrong_method.status_code == 405
+    assert wrong_method.get_json()["error"]["code"] == "method_not_allowed"
+
+
+def checklist(componentes="No", zona="No", obstrucciones="Si"):
+    return [
+        {"key": "libre_obstrucciones", "answer": obstrucciones},
+        {"key": "componentes_mal_estado", "answer": componentes},
+        {"key": "falla_constante", "answer": "No aplica"},
+        {"key": "equipo_energizado", "answer": "Si"},
+        {"key": "zona_limpia", "answer": zona},
+        {"key": "falla_solucionada", "answer": "Si"},
+        {"key": "protecciones_instaladas", "answer": "No aplica"},
+    ]
+
+
+def report_payload(**overrides):
+    data = {
+        "client": "Maltexco", "service_type": "Mantenimiento Preventivo", "description": "Prueba automática",
+        "area_id": 1, "section_id": 1, "machinery_id": 1,
+        "task_started_at": "2026-09-14T08:00:00-03:00", "task_finished_at": "2026-09-14T09:00:00-03:00",
+        "checklist": checklist(),
+    }
+    data.update(overrides)
+    return data
+
+
+def auth_headers(client, username="admin@example.test"):
+    return {"Authorization": f"Bearer {login(client, username)['access_token']}"}
+
+
+def test_catalogs_report_history_filters_and_scope(client):
+    headers = auth_headers(client)
+    areas = client.get("/api/v1/areas", headers=headers)
+    assert areas.status_code == 200
+    assert areas.get_json()["data"] == [{"id": 1, "name": "Malta"}]
+    assert client.get("/api/v1/sections", headers=headers).status_code == 400
+    assert client.get("/api/v1/sections?area_id=1", headers=headers).get_json()["data"][0]["name"] == "Despacho"
+    assert client.get("/api/v1/machineries?section_id=1", headers=headers).get_json()["data"][0]["name"] == "Soplador 1"
+
+    created = client.post("/api/v1/reports", json=report_payload(), headers=headers)
+    assert created.status_code == 201
+    report = created.get_json()["data"]
+    assert len(report["checklist"]) == 7
+    assert report["technician"]["username"] == "admin@example.test"
+
+    listing = client.get("/api/v1/reports?area_id=1&service_type=Mantenimiento%20Preventivo&page=1&page_size=1", headers=headers)
+    assert listing.status_code == 200
+    assert listing.get_json()["pagination"]["total"] == 1
+    detail = client.get(f"/api/v1/reports/{report['id']}", headers=headers)
+    assert detail.status_code == 200
+    assert detail.get_json()["data"]["id"] == report["id"]
+
+    technician_listing = client.get("/api/v1/reports", headers=auth_headers(client, "tech@example.test"))
+    assert technician_listing.status_code == 200
+    assert technician_listing.get_json()["pagination"]["total"] == 0
+    forbidden_filter = client.get("/api/v1/reports?technician_id=1", headers=auth_headers(client, "tech@example.test"))
+    assert forbidden_filter.status_code == 403
+
+
+def test_multipart_checklist_evidence_and_fuel_loads(client):
+    headers = auth_headers(client)
+    missing = client.post("/api/v1/reports", json=report_payload(checklist=checklist(componentes="Si")), headers=headers)
+    assert missing.status_code == 422
+    assert missing.get_json()["error"]["code"] == "evidence_required"
+
+    multipart_report = report_payload(checklist=checklist(componentes="Si"))
+    created = client.post(
+        "/api/v1/reports", headers=headers,
+        data={"payload": json.dumps(multipart_report), "evidence_componentes_mal_estado": (io.BytesIO(b"png"), "evidencia.png")},
+        content_type="multipart/form-data",
+    )
+    assert created.status_code == 201
+    checklist_rows = created.get_json()["data"]["checklist"]
+    assert next(item for item in checklist_rows if item["key"] == "componentes_mal_estado")["evidence_attachment_id"]
+    attachment = created.get_json()["data"]["attachments"][0]
+    download = client.get(attachment["download_path"], headers=headers)
+    assert download.status_code == 200
+    assert download.data == b"png"
+    assert client.get(attachment["download_path"], headers=auth_headers(client, "tech@example.test")).status_code == 404
+
+    fuel_payload = {
+        "loaded_at": "2026-09-14T10:30:00-03:00", "observations": "Prueba",
+        "generators": [{"number": 1, "liters": 749, "hourmeter": 200}, {"number": 2, "liters": 20.5, "hourmeter": 300}],
+    }
+    images = {"payload": json.dumps(fuel_payload)}
+    for name in ("water_1", "oil_1", "water_2", "oil_2"):
+        images[name] = (io.BytesIO(b"png"), f"{name}.png")
+    fuel = client.post("/api/v1/fuel-loads", headers=headers, data=images, content_type="multipart/form-data")
+    assert fuel.status_code == 201
+    assert fuel.get_json()["data"]["generators"][0]["liters"] == 749.0
+    assert client.get("/api/v1/fuel-loads?page=1&page_size=1", headers=headers).get_json()["pagination"]["total"] == 1
+    assert client.get(f"/api/v1/fuel-loads/{fuel.get_json()['data']['id']}", headers=headers).status_code == 200
+    image = client.get(f"/api/v1/fuel-loads/{fuel.get_json()['data']['id']}/generators/1/images/water", headers=headers)
+    assert image.status_code == 200
+    assert image.data == b"png"
+
+    invalid_fuel = dict(fuel_payload)
+    invalid_fuel["generators"] = [{"number": 1, "liters": 750, "hourmeter": 1}, {"number": 2, "liters": 1, "hourmeter": 1}]
+    assert client.post("/api/v1/fuel-loads", json=invalid_fuel, headers=headers).status_code == 422
+
+
+def test_existing_web_forms_continue_to_use_the_shared_rules(client):
+    client.get("/auth/login")
+    with client.session_transaction() as session:
+        csrf = session["csrf_token"]
+    assert client.post("/auth/login", data={"username": "admin@example.test", "password": "CorrectHorseBattery1", "csrf_token": csrf}).status_code == 302
+
+    client.get("/reports/maintenance/new")
+    with client.session_transaction() as session:
+        csrf = session["csrf_token"]
+    report_form = {
+        "csrf_token": csrf, "client": "Maltexco", "service_type": "Inspección", "description": "Formulario web",
+        "area_id": "1", "section_id": "1", "machinery_id": "1",
+        "task_started_at": "2026-09-14T08:00", "task_finished_at": "2026-09-14T09:00",
+    }
+    for item in checklist():
+        report_form[f"check_{item['key']}"] = item["answer"]
+    web_report = client.post("/reports/maintenance/new", data=report_form, follow_redirects=False)
+    assert web_report.status_code == 302
+    assert "/reports/" in web_report.headers["Location"]
+
+    client.get("/reports/fuel/new")
+    with client.session_transaction() as session:
+        csrf = session["csrf_token"]
+    fuel_form = {"csrf_token": csrf, "loaded_at": "2026-09-14T10:00", "liters_1": "1", "hourmeter_1": "1", "liters_2": "2", "hourmeter_2": "2"}
+    for name in ("water_1", "oil_1", "water_2", "oil_2"):
+        fuel_form[name] = (io.BytesIO(b"png"), f"{name}.png")
+    assert client.post("/reports/fuel/new", data=fuel_form, content_type="multipart/form-data", follow_redirects=False).status_code == 302

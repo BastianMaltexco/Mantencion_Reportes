@@ -25,6 +25,24 @@ class User(db.Model):
     reports: Mapped[list["Report"]] = relationship(back_populates="technician")
 
 
+class ApiRefreshToken(db.Model):
+    """Refresh token opaco: nunca se guarda su valor real en la base."""
+
+    __tablename__ = "ApiRefreshTokens"
+    __table_args__ = (
+        Index("IX_ApiRefreshTokens_Usuario_Expira", "UsuarioId", "ExpiraEn"),
+        {"schema": "dbo"},
+    )
+    id: Mapped[int] = mapped_column("ApiRefreshTokenId", Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column("UsuarioId", ForeignKey("dbo.Usuarios.IdUsuario"), nullable=False)
+    token_hash: Mapped[str] = mapped_column("TokenHash", String(64), unique=True, nullable=False)
+    issued_at: Mapped[object] = mapped_column("EmitidoEn", DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[object] = mapped_column("ExpiraEn", DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[object | None] = mapped_column("RevocadoEn", DateTime(timezone=True), nullable=True)
+    replaced_at: Mapped[object | None] = mapped_column("ReemplazadoEn", DateTime(timezone=True), nullable=True)
+    client_name: Mapped[str | None] = mapped_column("Cliente", String(100), nullable=True)
+
+
 class Report(db.Model):
     __tablename__ = "Reportes"
     __table_args__ = (

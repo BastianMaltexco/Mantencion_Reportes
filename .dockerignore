@@ -9,6 +9,9 @@ __pycache__
 .env.*
 !.env.example
 uploads
+output
+tmp
+tests
 *.xlsx
 *.xls
 *.csv

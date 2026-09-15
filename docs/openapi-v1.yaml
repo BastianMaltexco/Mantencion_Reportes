@@ -1,0 +1,328 @@
+openapi: 3.0.3
+info:
+  title: Reportes Mantención API
+  version: 1.0.0
+  description: >-
+    API móvil inicial. Flutter se comunica exclusivamente por HTTPS con esta API,
+    nunca directamente con Azure SQL ni con almacenamiento de archivos.
+servers:
+  - url: https://{host}/api/v1
+    variables:
+      host:
+        default: example.onrender.com
+paths:
+  /health:
+    get:
+      summary: Estado de API v1
+      responses:
+        '200':
+          description: Servicio disponible
+  /auth/login:
+    post:
+      summary: Autentica un usuario y emite tokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: {type: string, format: email}
+                password: {type: string, format: password}
+                client_name: {type: string, maxLength: 100}
+      responses:
+        '200': {$ref: '#/components/responses/TokenResponse'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '415': {$ref: '#/components/responses/Error'}
+  /auth/refresh:
+    post:
+      summary: Rota un refresh token válido
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: {type: string}
+      responses:
+        '200': {$ref: '#/components/responses/TokenResponse'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+  /auth/logout:
+    post:
+      summary: Revoca un refresh token; operación idempotente
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: {type: string}
+      responses:
+        '200':
+          description: Token revocado o ya inexistente
+        '400': {$ref: '#/components/responses/Error'}
+  /auth/me:
+    get:
+      summary: Obtiene el usuario autenticado
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Perfil del usuario}
+        '401': {$ref: '#/components/responses/Error'}
+  /admin/status:
+    get:
+      summary: Verificación de autorización de administrador
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Usuario administrador autenticado}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /areas:
+    get:
+      summary: Lista áreas activas
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Áreas activas}
+        '401': {$ref: '#/components/responses/Error'}
+  /sections:
+    get:
+      summary: Lista secciones activas de un área
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: area_id, in: query, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Secciones activas}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /machineries:
+    get:
+      summary: Lista maquinarias activas de una sección
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: section_id, in: query, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Maquinarias activas}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /reports:
+    get:
+      summary: Historial paginado de reportes de mantención
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - {$ref: '#/components/parameters/DateFrom'}
+        - {$ref: '#/components/parameters/DateTo'}
+        - {name: area_id, in: query, schema: {type: integer, minimum: 1}}
+        - {name: section_id, in: query, schema: {type: integer, minimum: 1}}
+        - {name: machinery_id, in: query, schema: {type: integer, minimum: 1}}
+        - {name: technician_id, in: query, schema: {type: integer, minimum: 1}}
+        - {name: service_type, in: query, schema: {type: string}}
+      responses:
+        '200': {description: Reportes paginados}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+    post:
+      summary: Crea reporte de mantención con checklist
+      description: JSON sin archivos o multipart con campo payload JSON y evidencias.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MaintenanceReportInput'}
+          multipart/form-data:
+            schema:
+              type: object
+              required: [payload]
+              properties:
+                payload: {type: string, description: JSON MaintenanceReportInput}
+                evidence_libre_obstrucciones: {type: string, format: binary}
+                evidence_componentes_mal_estado: {type: string, format: binary}
+                evidence_zona_limpia: {type: string, format: binary}
+                attachments: {type: array, items: {type: string, format: binary}}
+      responses:
+        '201': {description: Reporte creado}
+        '401': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /reports/{id}:
+    get:
+      summary: Obtiene reporte, checklist y metadatos de adjuntos
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Reporte}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /attachments/{id}:
+    get:
+      summary: Descarga privada de un adjunto autorizado
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Contenido binario autorizado}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /fuel-loads:
+    get:
+      summary: Historial paginado de cargas de petróleo
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - {$ref: '#/components/parameters/DateFrom'}
+        - {$ref: '#/components/parameters/DateTo'}
+        - {name: technician_id, in: query, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Cargas paginadas}
+    post:
+      summary: Crea carga de petróleo para los dos generadores
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [payload, water_1, oil_1, water_2, oil_2]
+              properties:
+                payload: {type: string, description: JSON FuelLoadInput}
+                water_1: {type: string, format: binary}
+                oil_1: {type: string, format: binary}
+                water_2: {type: string, format: binary}
+                oil_2: {type: string, format: binary}
+      responses:
+        '201': {description: Carga creada}
+        '401': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /fuel-loads/{id}:
+    get:
+      summary: Obtiene una carga de petróleo
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Carga}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /fuel-loads/{id}/generators/{number}/images/{kind}:
+    get:
+      summary: Descarga privada de una fotografía de carga
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: number, in: path, required: true, schema: {type: integer, enum: [1, 2]}}
+        - {name: kind, in: path, required: true, schema: {type: string, enum: [water, oil]}}
+      responses:
+        '200': {description: Contenido binario autorizado}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+components:
+  parameters:
+    Page: {name: page, in: query, schema: {type: integer, minimum: 1, default: 1}}
+    PageSize: {name: page_size, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 25}}
+    DateFrom: {name: date_from, in: query, schema: {type: string, format: date-time}}
+    DateTo: {name: date_to, in: query, schema: {type: string, format: date-time}}
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    TokenResponse:
+      description: Par access/refresh emitido
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TokenEnvelope'
+    Error:
+      description: Error uniforme
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+  schemas:
+    TokenEnvelope:
+      type: object
+      required: [data, request_id]
+      properties:
+        data:
+          type: object
+          required: [access_token, token_type, expires_in, refresh_token, refresh_expires_in, user]
+          properties:
+            access_token: {type: string}
+            token_type: {type: string, example: Bearer}
+            expires_in: {type: integer, example: 900}
+            refresh_token: {type: string}
+            refresh_expires_in: {type: integer, example: 2592000}
+            user: {$ref: '#/components/schemas/User'}
+        request_id: {type: string}
+    User:
+      type: object
+      required: [id, username, full_name, role]
+      properties:
+        id: {type: integer}
+        username: {type: string}
+        full_name: {type: string}
+        role: {type: string, enum: [Administrador, Técnico/Operativo]}
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code: {type: string}
+            message: {type: string}
+            details: {type: object, additionalProperties: true}
+            request_id: {type: string}
+    MaintenanceReportInput:
+      type: object
+      required: [client, service_type, description, area_id, section_id, machinery_id, task_started_at, task_finished_at, checklist]
+      properties:
+        client: {type: string}
+        service_type: {type: string, enum: [Mantenimiento Preventivo, Correctivo, Inspección, Instalación]}
+        description: {type: string}
+        area_id: {type: integer}
+        section_id: {type: integer}
+        machinery_id: {type: integer}
+        task_started_at: {type: string, format: date-time}
+        task_finished_at: {type: string, format: date-time}
+        checklist:
+          type: array
+          minItems: 7
+          items:
+            type: object
+            required: [key, answer]
+            properties:
+              key: {type: string}
+              answer: {type: string, enum: [Si, No, No aplica]}
+    FuelLoadInput:
+      type: object
+      required: [loaded_at, generators]
+      properties:
+        loaded_at: {type: string, format: date-time}
+        observations: {type: string}
+        generators:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            type: object
+            required: [number, liters, hourmeter]
+            properties:
+              number: {type: integer, enum: [1, 2]}
+              liters: {type: number, exclusiveMaximum: 750}
+              hourmeter: {type: number, minimum: 0}

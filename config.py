@@ -40,8 +40,21 @@ class Config:
     SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True, "pool_recycle": 1800}
     UPLOAD_FOLDER = Path(os.environ.get("UPLOAD_FOLDER", BASE_DIR / "uploads")).resolve()
     MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", 25 * 1024 * 1024))
+    # Local mantiene los uploads existentes. Render debe usar azure_blob y
+    # recibir su connection string exclusivamente como secreto del servicio.
+    FILE_STORAGE_BACKEND = os.environ.get("FILE_STORAGE_BACKEND", "local")
+    AZURE_STORAGE_CONNECTION_STRING = os.environ.get("AZURE_STORAGE_CONNECTION_STRING", "")
+    AZURE_STORAGE_CONTAINER = os.environ.get("AZURE_STORAGE_CONTAINER", "reportes-adjuntos")
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true"
     ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
     ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
+
+    # API móvil: el secreto puede rotarse independientemente de las cookies web.
+    # En producción API_TOKEN_SECRET debe definirse explícitamente y ser distinto
+    # de SECRET_KEY. El fallback mantiene compatibles las instalaciones locales.
+    API_TOKEN_SECRET = os.environ.get("API_TOKEN_SECRET", SECRET_KEY)
+    API_TOKEN_ISSUER = os.environ.get("API_TOKEN_ISSUER", "reportes-mantencion-api")
+    API_ACCESS_TOKEN_MINUTES = int(os.environ.get("API_ACCESS_TOKEN_MINUTES", "15"))
+    API_REFRESH_TOKEN_DAYS = int(os.environ.get("API_REFRESH_TOKEN_DAYS", "30"))

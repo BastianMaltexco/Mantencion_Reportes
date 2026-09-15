@@ -45,10 +45,48 @@ El proyecto incluye `Dockerfile` y `render.yaml`. Se usa Docker porque `pyodbc` 
 
    Render genera `SECRET_KEY` y el Blueprint no contiene ningún secreto. Mantenga `SESSION_COOKIE_SECURE=true`.
 3. Antes del primer deploy, agregue en el firewall del logical server de Azure una regla para la salida de Render. No habilite el acceso público amplio si puede usar una IP de salida estática. La regla actual solo permite la IP local usada durante la migración.
-4. Para las pruebas, `UPLOAD_FOLDER=/tmp/reportes-uploads`: los adjuntos se perderán al reiniciar, escalar o redeplegar. Render usa un sistema de archivos efímero. Para conservar archivos, use un disco persistente de Render (requiere servicio de pago) o, preferiblemente, Azure Blob Storage/S3 antes de producción.
+4. Para las pruebas, `UPLOAD_FOLDER=/tmp/reportes-uploads`: los adjuntos se perderán al reiniciar, escalar o redeplegar. Render usa un sistema de archivos efímero. Para conservar archivos use Azure Blob Storage, configurado como se describe abajo.
 
 La ejecución local no cambia: `py run.py` usa `.env`. Para probar localmente contra Azure: `$env:ENV_FILE = ".env.azure-test"; py run.py`.
 
 ## Diseño de datos
 
 El registro de fecha/hora usa `DATETIMEOFFSET(7)` con `SYSDATETIMEOFFSET()` como default de SQL Server. No se recibe desde el cliente y la aplicación no ofrece edición de reportes, conservando el sello de creación.
+
+## API móvil v1 (etapas 1-2)
+
+La API se encuentra bajo `/api/v1` y coexiste con la aplicación web basada en
+sesiones. Su contrato legible está en [`docs/API_V1_CONTRACT.md`](docs/API_V1_CONTRACT.md)
+y la especificación interoperable en [`docs/openapi-v1.yaml`](docs/openapi-v1.yaml).
+
+Antes de habilitarla en otra base, ejecute una vez
+[`migracion_api_refresh_tokens.sql`](migracion_api_refresh_tokens.sql). Para
+producción configure `API_TOKEN_SECRET` con un secreto aleatorio independiente
+de `SECRET_KEY`; no use el valor del ejemplo. Ejecute las pruebas con:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+## Azure Blob Storage privado
+
+La aplicación usa una única abstracción de almacenamiento. En desarrollo se
+mantiene `FILE_STORAGE_BACKEND=local`, que es compatible con los archivos ya
+existentes bajo `UPLOAD_FOLDER`. En Render configure manualmente estos valores
+como variables de entorno/secretos, sin incluirlos en Git:
+
+```text
+FILE_STORAGE_BACKEND=azure_blob
+AZURE_STORAGE_CONNECTION_STRING=<cadena de conexión secreta de strrptmanttestbrs01>
+AZURE_STORAGE_CONTAINER=reportes-adjuntos
+```
+
+El contenedor `reportes-adjuntos` es privado. SQL guarda solo identificadores
+lógicos de blob, como `reports/<id>/<uuid>.png` o
+`fuel-loads/<id>/<uuid>.png`; no guarda URLs públicas. La descarga pasa por
+rutas Flask autenticadas: la web usa `/attachments/<id>` y la API usa
+`/api/v1/attachments/<id>` o la ruta de imagen de la carga. Administradores
+pueden acceder a todos los archivos; técnicos solo a archivos de sus registros.
+
+Flutter nunca debe recibir la cadena de conexión ni credenciales Azure: deberá
+subir y descargar exclusivamente mediante la API Flask autenticada.

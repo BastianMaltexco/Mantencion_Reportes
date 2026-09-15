@@ -1,38 +1,29 @@
-from pathlib import Path
-import uuid
-from datetime import datetime
-
-from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, send_from_directory, session, url_for
+from flask import Blueprint, Response, current_app, flash, jsonify, redirect, render_template, request, session, stream_with_context, url_for
 from sqlalchemy import func, select
-from werkzeug.datastructures import FileStorage
-from werkzeug.utils import secure_filename
 
 from app import db, login_required
 from app.models import Area, Attachment, FuelLoad, FuelLoadGenerator, Machinery, Report, ReportChecklist, Section, User
+from app.services.field_reports import (
+    BusinessRuleError, CHECKLIST, IMAGE_EXTENSIONS, SERVICE_TYPES,
+    create_fuel_load as create_fuel_load_service,
+    create_maintenance_report,
+)
+from app.services.storage import StorageError, get_file_storage, resolve_fuel_key, resolve_report_key
 
 reports_bp = Blueprint("reports", __name__)
-ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "pdf", "doc", "docx", "xls", "xlsx"}
-IMAGE_EXTENSIONS = {"jpg", "jpeg", "png"}
-SERVICE_TYPES = ("Mantenimiento Preventivo", "Correctivo", "Inspección", "Instalación")
-CHECKLIST = (
-    ("libre_obstrucciones", "Libre de elementos que pueden obstruir el trabajo?", "No"),
-    ("componentes_mal_estado", "Piezas o componentes en mal estado?", "Si"),
-    ("falla_constante", "Problema o falla es constante?", None),
-    ("equipo_energizado", "Entrega de equipo energizado?", None),
-    ("zona_limpia", "Zona de trabajo limpia?", "Si"),
-    ("falla_solucionada", "Problema o falla solucionada?", None),
-    ("protecciones_instaladas", "Protecciones instaladas?", None),
-)
 
 
-def _allowed(file: FileStorage):
-    return "." in file.filename and file.filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+def _can_access_record(technician_id):
+    return session.get("role") == "Administrador" or technician_id == session.get("user_id")
 
 
-def _image(file: FileStorage | None):
-    return file and file.filename and "." in file.filename and file.filename.rsplit(".", 1)[1].lower() in IMAGE_EXTENSIONS
-
-
+def _file_response(storage, key, filename, mime_type, *, attachment=True):
+    if not storage.exists(key):
+        return "Archivo no encontrado.", 404
+    response = Response(stream_with_context(storage.iter_bytes(key)), mimetype=mime_type)
+    response.headers.set("Content-Disposition", "attachment" if attachment else "inline", filename=filename)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 @reports_bp.get("/")
 @login_required
 def dashboard():
@@ -92,96 +83,44 @@ def choose_report():
 @login_required
 def create_report():
     if request.method == "POST":
-        client = request.form.get("client", "").strip()
-        service_type = request.form.get("service_type", "")
-        description = request.form.get("description", "").strip()
-        area_id = request.form.get("area_id", type=int)
-        section_id = request.form.get("section_id", type=int)
-        machinery_id = request.form.get("machinery_id", type=int)
-        started_raw = request.form.get("task_started_at", "")
-        finished_raw = request.form.get("task_finished_at", "")
+        data = {
+            "client": request.form.get("client", ""),
+            "service_type": request.form.get("service_type", ""),
+            "description": request.form.get("description", ""),
+            "area_id": request.form.get("area_id"),
+            "section_id": request.form.get("section_id"),
+            "machinery_id": request.form.get("machinery_id"),
+            "task_started_at": request.form.get("task_started_at", ""),
+            "task_finished_at": request.form.get("task_finished_at", ""),
+            "checklist": {key: request.form.get(f"check_{key}", "") for key, _, _ in CHECKLIST},
+        }
+        evidence_files = {key: request.files.get(f"evidence_{key}") for key, _, expected in CHECKLIST if expected}
         try:
-            local_tz = datetime.now().astimezone().tzinfo
-            task_started_at = datetime.fromisoformat(started_raw).replace(tzinfo=local_tz) if started_raw else None
-            task_finished_at = datetime.fromisoformat(finished_raw).replace(tzinfo=local_tz) if finished_raw else None
-        except ValueError:
-            task_started_at = task_finished_at = None
-        files = [f for f in request.files.getlist("attachments") if f and f.filename]
-        invalid = [f.filename for f in files if not _allowed(f)]
-        answers = {key: request.form.get(f"check_{key}", "") for key, _, _ in CHECKLIST}
-        evidence_files = {key: request.files.get(f"evidence_{key}") for key, _, required_answer in CHECKLIST if required_answer}
-        machine = db.session.get(Machinery, machinery_id) if machinery_id else None
-        section = db.session.get(Section, section_id) if section_id else None
-        valid_asset = machine and section and section.area_id == area_id and machine.section_id == section_id and machine.is_active and section.is_active
-        if not all((client, description, area_id, section_id, machinery_id, task_started_at, task_finished_at)) or service_type not in SERVICE_TYPES:
-            flash("Complete los campos requeridos y seleccione un tipo de servicio válido.", "error")
-        elif task_finished_at < task_started_at:
-            flash("La finalización de tarea no puede ser anterior al comienzo.", "error")
-        elif not valid_asset:
-            flash("La selección de área, sección y maquinaria no es válida.", "error")
-        elif any(answer not in {"Si", "No", "No aplica"} for answer in answers.values()):
-            flash("Responda todas las preguntas de entrega de equipo.", "error")
-        elif any(answers[key] == required_answer and not _image(evidence_files[key]) for key, _, required_answer in CHECKLIST if required_answer):
-            flash("Debe adjuntar una imagen JPG o PNG para cada respuesta que requiere evidencia.", "error")
-        elif invalid:
-            flash("Formato no permitido: " + ", ".join(invalid), "error")
-        else:
-            report = Report(client=client, location=None, service_type=service_type, description=description,
-                            technician_id=session["user_id"], area_id=area_id, section_id=section_id, machinery_id=machinery_id)
-            report.task_started_at = task_started_at
-            report.task_finished_at = task_finished_at
-            db.session.add(report)
-            db.session.flush()
-            report_folder = Path(current_app.config["UPLOAD_FOLDER"]) / str(report.id)
-            report_folder.mkdir(parents=True, exist_ok=True)
-            evidence_attachment_ids = {}
-            for key, question, required_answer in CHECKLIST:
-                evidence = evidence_files.get(key) if required_answer else None
-                if evidence and evidence.filename:
-                    original_name = secure_filename(evidence.filename)
-                    extension = original_name.rsplit(".", 1)[1].lower()
-                    stored_name = f"{uuid.uuid4().hex}.{extension}"
-                    target = report_folder / stored_name
-                    evidence.save(target)
-                    attachment = Attachment(report_id=report.id, original_name=original_name, stored_name=stored_name,
-                                            mime_type=evidence.mimetype or "application/octet-stream", file_size=target.stat().st_size)
-                    db.session.add(attachment)
-                    db.session.flush()
-                    evidence_attachment_ids[key] = attachment.id
-                db.session.add(ReportChecklist(report_id=report.id, question_key=key, question_text=question, answer=answers[key], evidence_attachment_id=evidence_attachment_ids.get(key)))
-            for file in files:
-                original_name = secure_filename(file.filename)
-                extension = original_name.rsplit(".", 1)[1].lower()
-                stored_name = f"{uuid.uuid4().hex}.{extension}"
-                target = report_folder / stored_name
-                file.save(target)
-                db.session.add(Attachment(report_id=report.id, original_name=original_name, stored_name=stored_name,
-                                          mime_type=file.mimetype or "application/octet-stream", file_size=target.stat().st_size))
-            db.session.commit()
+            report = create_maintenance_report(
+                data=data, technician_id=session["user_id"], evidence_files=evidence_files,
+                attachments=request.files.getlist("attachments"), upload_folder=current_app.config["UPLOAD_FOLDER"],
+            )
             flash("Reporte registrado y sellado con la hora del servidor.", "success")
             return redirect(url_for("reports.report_detail", report_id=report.id))
+        except BusinessRuleError as error:
+            flash(str(error), "error")
     return render_template("create_report.html", service_types=SERVICE_TYPES, checklist=CHECKLIST)
 
 @reports_bp.route("/reports/fuel/new", methods=["GET", "POST"])
 @login_required
 def create_fuel_load():
     if request.method == "POST":
+        data = {
+            "loaded_at": request.form.get("loaded_at", ""), "observations": request.form.get("observations", ""),
+            "generators": [{"number": number, "liters": request.form.get(f"liters_{number}"), "hourmeter": request.form.get(f"hourmeter_{number}")} for number in (1, 2)],
+        }
+        images = {(number, kind): request.files.get(f"{kind}_{number}") for number in (1, 2) for kind in ("water", "oil")}
         try:
-            loaded_at = datetime.fromisoformat(request.form["loaded_at"]).replace(tzinfo=datetime.now().astimezone().tzinfo)
-            values = [(n, float(request.form[f"liters_{n}"]), float(request.form[f"hourmeter_{n}"])) for n in (1, 2)]
-        except (KeyError, ValueError):
-            flash("Complete fecha, litros y horómetros con valores válidos.", "error"); return render_template("fuel_load.html")
-        images = {(n, kind): request.files.get(f"{kind}_{n}") for n in (1,2) for kind in ("water", "oil")}
-        if any(l < 0 or l > 749 or h < 0 for _, l, h in values) or any(not _image(f) for f in images.values()):
-            flash("Los litros permitidos van de 0 a 749 y las cuatro fotografías JPG/PNG son obligatorias.", "error"); return render_template("fuel_load.html")
-        load = FuelLoad(technician_id=session["user_id"], loaded_at=loaded_at, observations=request.form.get("observations", "").strip() or None)
-        db.session.add(load); db.session.flush(); folder = Path(current_app.config["UPLOAD_FOLDER"]) / "fuel" / str(load.id); folder.mkdir(parents=True, exist_ok=True)
-        for n, liters, hourmeter in values:
-            names=[]
-            for kind in ("water","oil"):
-                f=images[(n,kind)]; ext=secure_filename(f.filename).rsplit('.',1)[1].lower(); name=f"g{n}_{kind}_{uuid.uuid4().hex}.{ext}"; f.save(folder/name); names.append(name)
-            db.session.add(FuelLoadGenerator(load_id=load.id,generator_number=n,liters=liters,hourmeter=hourmeter,water_image=names[0],oil_image=names[1]))
-        db.session.commit(); flash("Carga de petróleo registrada.", "success"); return redirect(url_for("reports.dashboard"))
+            create_fuel_load_service(data=data, technician_id=session["user_id"], images=images, upload_folder=current_app.config["UPLOAD_FOLDER"])
+            flash("Carga de petróleo registrada.", "success")
+            return redirect(url_for("reports.dashboard"))
+        except BusinessRuleError as error:
+            flash(str(error), "error")
     return render_template("fuel_load.html")
 
 
@@ -231,5 +170,36 @@ def print_report(report_id):
 @login_required
 def download_attachment(attachment_id):
     attachment = db.get_or_404(Attachment, attachment_id)
-    folder = Path(current_app.config["UPLOAD_FOLDER"]) / str(attachment.report_id)
-    return send_from_directory(folder, attachment.stored_name, as_attachment=True, download_name=attachment.original_name)
+    report = db.get_or_404(Report, attachment.report_id)
+    if not _can_access_record(report.technician_id):
+        return "Acceso no autorizado.", 403
+    try:
+        storage = get_file_storage()
+        key = resolve_report_key(storage, attachment.report_id, attachment.stored_name)
+        return _file_response(storage, key, attachment.original_name, attachment.mime_type, attachment=request.args.get("view") != "1")
+    except StorageError:
+        current_app.logger.exception("Error al recuperar adjunto %s", attachment.id)
+        return "No fue posible recuperar el archivo.", 503
+
+
+@reports_bp.get("/fuel-loads/<int:load_id>/generators/<int:generator_number>/images/<kind>")
+@login_required
+def view_fuel_image(load_id, generator_number, kind):
+    if kind not in {"water", "oil"}:
+        return "Archivo no encontrado.", 404
+    load = db.get_or_404(FuelLoad, load_id)
+    if not _can_access_record(load.technician_id):
+        return "Acceso no autorizado.", 403
+    detail = db.session.execute(select(FuelLoadGenerator).where(
+        FuelLoadGenerator.load_id == load_id, FuelLoadGenerator.generator_number == generator_number
+    )).scalar_one_or_none()
+    if not detail:
+        return "Archivo no encontrado.", 404
+    stored_name = detail.water_image if kind == "water" else detail.oil_image
+    try:
+        storage = get_file_storage()
+        key = resolve_fuel_key(storage, load_id, stored_name)
+        return _file_response(storage, key, f"generador_{generator_number}_{kind}.png", "image/png", attachment=request.args.get("view") != "1")
+    except StorageError:
+        current_app.logger.exception("Error al recuperar fotografía de carga %s", load_id)
+        return "No fue posible recuperar el archivo.", 503

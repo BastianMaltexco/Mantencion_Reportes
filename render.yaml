@@ -9,6 +9,8 @@ services:
     envVars:
       - key: SECRET_KEY
         generateValue: true
+      - key: API_TOKEN_SECRET
+        sync: false
       - key: DB_SERVER
         sync: false
       - key: DB_PORT
@@ -29,5 +31,11 @@ services:
         value: "true"
       - key: UPLOAD_FOLDER
         value: /tmp/reportes-uploads
+      - key: FILE_STORAGE_BACKEND
+        value: azure_blob
+      - key: AZURE_STORAGE_CONNECTION_STRING
+        sync: false
+      - key: AZURE_STORAGE_CONTAINER
+        value: reportes-adjuntos
       - key: WEB_CONCURRENCY
         value: "2"

@@ -21,3 +21,6 @@ __pycache__/
 *.csv
 uploads/*
 !uploads/.gitkeep
+output/
+tmp/
+tests/.uploads/

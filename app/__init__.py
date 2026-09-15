@@ -40,6 +40,10 @@ def csrf_token():
 
 
 def validate_csrf():
+    # La API móvil no utiliza cookies de sesión: se autentica exclusivamente
+    # mediante Authorization: Bearer. Por ello no corresponde exigirle CSRF.
+    if request.path.startswith("/api/"):
+        return None
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
         token = request.form.get("csrf_token", "")
         if not token or not secrets.compare_digest(token, session.get("csrf_token", "")):
@@ -63,8 +67,10 @@ def create_app(config_class=Config):
     app.before_request(validate_csrf)
 
     from app.auth import auth_bp
+    from app.api import api_bp, api_error_response
     from app.reports import reports_bp
     app.register_blueprint(auth_bp)
+    app.register_blueprint(api_bp)
     app.register_blueprint(reports_bp)
 
     @app.template_filter("localdatetime")
@@ -75,7 +81,21 @@ def create_app(config_class=Config):
 
     @app.errorhandler(403)
     def forbidden(_error):
+        if request.path.startswith("/api/v1/"):
+            return api_error_response(403, "forbidden", "No tiene permiso para esta operación.")
         return "Acceso no autorizado.", 403
+
+    @app.errorhandler(404)
+    def not_found(error):
+        if request.path.startswith("/api/v1/"):
+            return api_error_response(404, "not_found", "El recurso solicitado no existe.")
+        return error
+
+    @app.errorhandler(405)
+    def method_not_allowed(error):
+        if request.path.startswith("/api/v1/"):
+            return api_error_response(405, "method_not_allowed", "El método HTTP no está permitido.")
+        return error
 
     @app.errorhandler(413)
     def too_large(_error):
