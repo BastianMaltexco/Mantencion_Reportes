@@ -6,17 +6,27 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:reportes_mantencion_mobile/core/config/app_config.dart';
 import 'package:reportes_mantencion_mobile/core/network/api_client.dart';
+import 'package:reportes_mantencion_mobile/core/network/private_api_path.dart';
 import 'package:reportes_mantencion_mobile/core/network/secure_token_storage.dart';
-import 'package:reportes_mantencion_mobile/features/history/presentation/report_detail_page.dart';
 
 void main() {
   test('normaliza la ruta privada del adjunto sin duplicar /api/v1', () {
     expect(
-      attachmentApiPath(
+      privateApiPath(
         '/api/v1/attachments/42',
         'https://mantencion-reportes.onrender.com/api/v1',
       ),
       '/attachments/42',
+    );
+  });
+
+  test('normaliza igualmente una fotografía privada de carga de petróleo', () {
+    expect(
+      privateApiPath(
+        '/api/v1/fuel-loads/18/generators/1/images/water',
+        'https://mantencion-reportes.onrender.com/api/v1',
+      ),
+      '/fuel-loads/18/generators/1/images/water',
     );
   });
 
@@ -42,7 +52,7 @@ void main() {
     );
 
     final response = await client.dio.get<List<int>>(
-      attachmentApiPath('/api/v1/attachments/42', client.dio.options.baseUrl),
+      privateApiPath('/api/v1/attachments/42', client.dio.options.baseUrl),
       options: Options(responseType: ResponseType.bytes),
     );
 

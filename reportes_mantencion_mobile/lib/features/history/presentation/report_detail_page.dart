@@ -4,38 +4,17 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/network/private_api_path.dart';
 import '../../../core/providers.dart';
 import '../domain/report_history_models.dart';
 import 'report_history_controller.dart';
-
-/// Convierte la ruta que entrega Flask en una ruta relativa a la API base.
-///
-/// `download_path` incluye `/api/v1`, mientras que el `Dio` autenticado ya
-/// tiene ese prefijo en `baseUrl`. Conservar ambos producía solicitudes a
-/// `/api/v1/api/v1/attachments/{id}`.
-String attachmentApiPath(String downloadPath, String apiBaseUrl) {
-  final apiBase = Uri.parse(apiBaseUrl);
-  final download = Uri.parse(downloadPath);
-  if (download.hasScheme &&
-      (download.scheme != apiBase.scheme ||
-          download.authority != apiBase.authority)) {
-    throw const FormatException('La ruta del adjunto no pertenece a la API.');
-  }
-
-  final basePath = apiBase.path.replaceFirst(RegExp(r'/+$'), '');
-  final downloadPathOnly = download.path;
-  if (!downloadPathOnly.startsWith('$basePath/')) {
-    throw const FormatException('La ruta privada del adjunto es inválida.');
-  }
-  return downloadPathOnly.substring(basePath.length);
-}
 
 final attachmentImageProvider = FutureProvider.family<Uint8List, String>((
   ref,
   downloadPath,
 ) async {
   final dio = ref.read(dioProvider);
-  final path = attachmentApiPath(downloadPath, dio.options.baseUrl);
+  final path = privateApiPath(downloadPath, dio.options.baseUrl);
   final response = await dio.get<List<int>>(
     path,
     options: Options(responseType: ResponseType.bytes),
