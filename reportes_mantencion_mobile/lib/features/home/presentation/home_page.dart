@@ -97,7 +97,38 @@ class _HomeMenu extends StatelessWidget {
           onTap: () => context.push('/users'),
         ),
       ],
+      const SizedBox(height: 36),
+      const _MaltexcoBrand(),
     ],
+  );
+}
+
+class _MaltexcoBrand extends StatelessWidget {
+  const _MaltexcoBrand();
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: 'Desarrollado por Maltexco',
+    child: Column(
+      children: [
+        Opacity(
+          opacity: .78,
+          child: Image.asset(
+            'assets/images/logo_maltexco.png',
+            width: 104,
+            height: 52,
+            fit: BoxFit.contain,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          'Desarrollado por Maltexco',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    ),
   );
 }
 

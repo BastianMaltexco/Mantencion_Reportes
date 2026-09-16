@@ -2,10 +2,20 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:reportes_mantencion_mobile/features/reports/domain/maintenance_report.dart';
 
 void main() {
+  test('expone exactamente los cinco tipos de mantención permitidos', () {
+    expect(serviceTypes, const [
+      'Correctiva',
+      'Preventiva',
+      'Predictiva',
+      'Nueva instalación',
+      'Otro',
+    ]);
+  });
+
   MaintenanceReportInput validInput({Map<String, String?>? checklist}) =>
       MaintenanceReportInput(
         client: 'Maltexco',
-        serviceType: 'Correctivo',
+        serviceType: 'Correctiva',
         description: 'Se realizó el trabajo de prueba.',
         areaId: 1,
         sectionId: 2,
@@ -64,7 +74,7 @@ void main() {
   test('rechaza una finalización anterior al comienzo antes del envío', () {
     final input = MaintenanceReportInput(
       client: 'Maltexco',
-      serviceType: 'Correctivo',
+      serviceType: 'Correctiva',
       description: 'Trabajo',
       areaId: 1,
       sectionId: 2,
@@ -92,5 +102,30 @@ void main() {
     expect(payload['area_id'], 1);
     expect(payload['checklist'], hasLength(7));
     expect(payload['task_started_at'], contains(RegExp(r'[+-]\d{2}:\d{2}$')));
+  });
+
+  test('rechaza localmente un tipo histórico para nuevos reportes', () {
+    final input = validInput();
+    final historical = MaintenanceReportInput(
+      client: input.client,
+      serviceType: 'Correctivo',
+      description: input.description,
+      areaId: input.areaId,
+      sectionId: input.sectionId,
+      machineryId: input.machineryId,
+      taskStartedAt: input.taskStartedAt,
+      taskFinishedAt: input.taskFinishedAt,
+      checklist: input.checklist,
+    );
+    expect(
+      historical.validate(
+        evidenceKeys: const {
+          'libre_obstrucciones',
+          'componentes_mal_estado',
+          'zona_limpia',
+        },
+      ).join(' '),
+      contains('tipo de servicio válido'),
+    );
   });
 }

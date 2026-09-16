@@ -36,7 +36,7 @@ CREATE TABLE dbo.Reportes (
     TecnicoId INT NOT NULL,
     /* Esta columna no se expone a edicion desde la aplicación. */
     CreadoEn DATETIMEOFFSET(7) NOT NULL CONSTRAINT DF_Reportes_CreadoEn DEFAULT (SYSDATETIMEOFFSET()),
-    CONSTRAINT CK_Reportes_TipoServicio CHECK (TipoServicio IN (N'Mantenimiento Preventivo', N'Correctivo', N'Inspección', N'Instalación')),
+    CONSTRAINT CK_Reportes_TipoServicio CHECK (TipoServicio IN (N'Correctiva', N'Preventiva', N'Predictiva', N'Nueva instalación', N'Otro')),
     CONSTRAINT FK_Reportes_Usuarios FOREIGN KEY (TecnicoId) REFERENCES dbo.Usuarios(IdUsuario)
 );
 GO

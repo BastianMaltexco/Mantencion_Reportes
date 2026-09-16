@@ -1,4 +1,4 @@
-from flask import Blueprint, Response, current_app, flash, jsonify, redirect, render_template, request, session, stream_with_context, url_for
+from flask import Blueprint, Response, current_app, flash, jsonify, redirect, render_template, request, send_file, session, stream_with_context, url_for
 from sqlalchemy import func, select
 
 from app import db, login_required
@@ -9,12 +9,17 @@ from app.services.field_reports import (
     create_maintenance_report,
 )
 from app.services.storage import StorageError, get_file_storage, resolve_fuel_key, resolve_report_key
+from app.services.dashboard import (
+    DashboardPermissionError, DashboardValidationError, dashboard_export_records,
+    dashboard_summary as build_dashboard_summary, parse_filters,
+)
+from app.services.dashboard_export import csv_bytes, xlsx_bytes
 
 reports_bp = Blueprint("reports", __name__)
 
 
 def _can_access_record(technician_id):
-    return session.get("role") == "Administrador" or technician_id == session.get("user_id")
+    return (session.get("role") or "").casefold() == "administrador" or technician_id == session.get("user_id")
 
 
 def _file_response(storage, key, filename, mime_type, *, attachment=True):
@@ -48,30 +53,69 @@ def _filtered_reports():
 @reports_bp.get("/dashboard")
 @login_required
 def metrics_dashboard():
-    record_type = request.args.get("record_type", "maintenance")
-    if record_type == "fuel":
-        query = select(FuelLoad).order_by(FuelLoad.loaded_at.desc())
-        if request.args.get("technician_id", type=int): query = query.where(FuelLoad.technician_id == request.args.get("technician_id", type=int))
-        if request.args.get("date_from"): query = query.where(FuelLoad.loaded_at >= request.args["date_from"])
-        fuel_loads = db.session.execute(query).scalars().all()
-        counts = {}
-        for load in fuel_loads:
-            user = db.session.get(User, load.technician_id); counts[user.full_name] = counts.get(user.full_name, 0) + 1
-        technicians = db.session.execute(select(User).where(User.is_active == True).order_by(User.full_name)).scalars().all()  # noqa: E712
-        return render_template("metrics_dashboard.html", record_type=record_type, fuel_loads=fuel_loads, reports=[], total=len(fuel_loads), by_user=sorted(counts.items(), key=lambda x:x[1], reverse=True), by_service={"Carga de petróleo":len(fuel_loads)}, by_machine={}, by_date={x.loaded_at.strftime("%d-%m"): sum(1 for y in fuel_loads if y.loaded_at.strftime("%d-%m")==x.loaded_at.strftime("%d-%m")) for x in fuel_loads}, technicians=technicians, areas=[], sections=[], machines=[])
-    reports = db.session.execute(_filtered_reports().order_by(Report.created_at.desc())).scalars().all()
-    counts = {}
-    for report in reports:
-        counts[report.technician.full_name] = counts.get(report.technician.full_name, 0) + 1
-    service_counts, machine_counts, date_counts = {}, {}, {}
-    for report in reports:
-        service_counts[report.service_type] = service_counts.get(report.service_type, 0) + 1
-        machine = report.machinery.name if report.machinery else "Sin maquinaria"
-        machine_counts[machine] = machine_counts.get(machine, 0) + 1
-        day = report.created_at.strftime("%d-%m") if report.created_at else "Sin fecha"
-        date_counts[day] = date_counts.get(day, 0) + 1
-    technicians = db.session.execute(select(User).where(User.is_active == True).order_by(User.full_name)).scalars().all()  # noqa: E712
-    return render_template("metrics_dashboard.html", record_type=record_type, fuel_loads=[], reports=reports, total=len(reports), by_user=sorted(counts.items(), key=lambda x: x[1], reverse=True), by_service=service_counts, by_machine=sorted(machine_counts.items(), key=lambda x: x[1], reverse=True)[:8], by_date=date_counts, technicians=technicians, areas=db.session.execute(select(Area).order_by(Area.name)).scalars().all(), sections=db.session.execute(select(Section).order_by(Section.name)).scalars().all(), machines=db.session.execute(select(Machinery).order_by(Machinery.name)).scalars().all())
+    is_admin = (session.get("role") or "").casefold() == "administrador"
+    activity_page = request.args.get("activity_page", 1, type=int) or 1
+    try:
+        filters = parse_filters(request.args)
+        data = build_dashboard_summary(filters, actor_id=session["user_id"], is_admin=is_admin, activity_page=activity_page, activity_page_size=50)
+    except DashboardValidationError as error:
+        flash(str(error), "error")
+        return redirect(url_for("reports.metrics_dashboard"))
+    except DashboardPermissionError:
+        return "Acceso no autorizado.", 403
+    technicians = (db.session.execute(select(User).where(User.is_active == True).order_by(User.full_name)).scalars().all()  # noqa: E712
+                   if is_admin else [db.session.get(User, session["user_id"])])
+    active_args = request.args.to_dict(flat=True)
+    page_args = {key: value for key, value in active_args.items() if key != "activity_page"}
+    pagination = data["activity_pagination"]
+    return render_template(
+        "metrics_dashboard.html", dashboard=data, filters=filters, technicians=technicians,
+        areas=db.session.execute(select(Area).where(Area.is_active == True).order_by(Area.name)).scalars().all(),  # noqa: E712
+        sections=db.session.execute(select(Section).where(Section.is_active == True).order_by(Section.name)).scalars().all(),  # noqa: E712
+        machines=db.session.execute(select(Machinery).where(Machinery.is_active == True).order_by(Machinery.name)).scalars().all(),  # noqa: E712
+        service_types=SERVICE_TYPES, is_admin=is_admin,
+        export_xlsx_url=url_for("reports.dashboard_export", **{**active_args, "format": "xlsx"}),
+        export_csv_url=url_for("reports.dashboard_export", **{**active_args, "format": "csv"}),
+        activity_previous_url=(url_for("reports.metrics_dashboard", **{**page_args, "activity_page": pagination["page"] - 1}) if pagination["page"] > 1 else None),
+        activity_next_url=(url_for("reports.metrics_dashboard", **{**page_args, "activity_page": pagination["page"] + 1}) if pagination["page"] < pagination["total_pages"] else None),
+    )
+
+
+def _dashboard_filter_labels(filters, is_admin):
+    """Etiquetas legibles para la hoja Resumen, sin cambiar los filtros efectivos."""
+    user = db.session.get(User, filters.technician_id) if filters.technician_id else None
+    area = db.session.get(Area, filters.area_id) if filters.area_id else None
+    section = db.session.get(Section, filters.section_id) if filters.section_id else None
+    machine = db.session.get(Machinery, filters.machinery_id) if filters.machinery_id else None
+    return [
+        ("Período desde", filters.date_from), ("Período hasta", filters.date_to),
+        ("Técnico / trabajador", user.full_name if user else ("Todos" if is_admin else session.get("user_name"))),
+        ("Tipo de registro", {"all": "Todos", "maintenance": "Mantención", "fuel": "Carga de petróleo"}[filters.record_type]),
+        ("Área", area.name if area else None), ("Sección", section.name if section else None),
+        ("Maquinaria", machine.name if machine else None), ("Tipo de servicio", filters.service_type),
+    ]
+
+
+@reports_bp.get("/dashboard/export")
+@login_required
+def dashboard_export():
+    """Descarga en memoria; jamás publica el archivo ni credenciales de Blob."""
+    export_format = (request.args.get("format") or "").lower()
+    if export_format not in {"xlsx", "csv"}:
+        return "Formato de exportación no válido.", 400
+    is_admin = (session.get("role") or "").casefold() == "administrador"
+    try:
+        filters = parse_filters(request.args)
+        data = build_dashboard_summary(filters, actor_id=session["user_id"], is_admin=is_admin, activity_page=1, activity_page_size=1)
+        reports, fuel_loads = dashboard_export_records(filters, actor_id=session["user_id"], is_admin=is_admin)
+    except DashboardValidationError as error:
+        return str(error), 400
+    except DashboardPermissionError:
+        return "Acceso no autorizado.", 403
+    if export_format == "xlsx":
+        payload = xlsx_bytes(data, reports, fuel_loads, _dashboard_filter_labels(filters, is_admin))
+        return send_file(payload, as_attachment=True, download_name="dashboard_reportes.xlsx", mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    return Response(csv_bytes(reports, fuel_loads), mimetype="text/csv; charset=utf-8", headers={"Content-Disposition": "attachment; filename=dashboard_reportes.csv"})
 
 
 @reports_bp.get("/reports/new")

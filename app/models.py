@@ -46,7 +46,7 @@ class ApiRefreshToken(db.Model):
 class Report(db.Model):
     __tablename__ = "Reportes"
     __table_args__ = (
-        CheckConstraint("TipoServicio IN ('Mantenimiento Preventivo', 'Correctivo', 'Inspección', 'Instalación')", name="CK_Reportes_TipoServicio"),
+        CheckConstraint("TipoServicio IN ('Correctiva', 'Preventiva', 'Predictiva', 'Nueva instalación', 'Otro')", name="CK_Reportes_TipoServicio"),
         Index("IX_Reportes_CreadoEn", "CreadoEn"), Index("IX_Reportes_Cliente", "Cliente"),
         {"schema": "dbo"},
     )

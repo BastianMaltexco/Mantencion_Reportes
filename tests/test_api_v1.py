@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 
 import pytest
+from openpyxl import load_workbook
 from sqlalchemy import text
 from werkzeug.security import generate_password_hash
 
@@ -127,7 +128,7 @@ def checklist(componentes="No", zona="No", obstrucciones="Si"):
 
 def report_payload(**overrides):
     data = {
-        "client": "Maltexco", "service_type": "Mantenimiento Preventivo", "description": "Prueba automática",
+        "client": "Maltexco", "service_type": "Preventiva", "description": "Prueba automática",
         "area_id": 1, "section_id": 1, "machinery_id": 1,
         "task_started_at": "2026-09-14T08:00:00-03:00", "task_finished_at": "2026-09-14T09:00:00-03:00",
         "checklist": checklist(),
@@ -155,7 +156,7 @@ def test_catalogs_report_history_filters_and_scope(client):
     assert len(report["checklist"]) == 7
     assert report["technician"]["username"] == "admin@example.test"
 
-    listing = client.get("/api/v1/reports?area_id=1&service_type=Mantenimiento%20Preventivo&page=1&page_size=1", headers=headers)
+    listing = client.get("/api/v1/reports?area_id=1&service_type=Preventiva&page=1&page_size=1", headers=headers)
     assert listing.status_code == 200
     assert listing.get_json()["pagination"]["total"] == 1
     detail = client.get(f"/api/v1/reports/{report['id']}", headers=headers)
@@ -211,6 +212,25 @@ def test_multipart_checklist_evidence_and_fuel_loads(client):
     assert client.post("/api/v1/fuel-loads", json=invalid_fuel, headers=headers).status_code == 422
 
 
+@pytest.mark.parametrize("service_type", ["Correctiva", "Preventiva", "Predictiva", "Nueva instalación", "Otro"])
+def test_new_reports_accept_only_the_five_maintenance_types(client, service_type):
+    headers = auth_headers(client)
+    response = client.post("/api/v1/reports", json=report_payload(service_type=service_type), headers=headers)
+    assert response.status_code == 201
+    assert response.get_json()["data"]["service_type"] == service_type
+    dashboard = client.get("/api/v1/dashboard/summary", query_string={"record_type": "maintenance", "service_type": service_type}, headers=headers)
+    assert dashboard.status_code == 200
+    assert dashboard.get_json()["data"]["summary"]["maintenance_reports"] == 1
+
+
+def test_new_reports_and_dashboard_filters_reject_unknown_maintenance_type(client):
+    headers = auth_headers(client)
+    invalid = client.post("/api/v1/reports", json=report_payload(service_type="Inspección"), headers=headers)
+    assert invalid.status_code == 422
+    assert invalid.get_json()["error"]["code"] == "validation_error"
+    assert client.get("/api/v1/dashboard/summary?service_type=Inspecci%C3%B3n", headers=headers).status_code == 400
+
+
 def test_dashboard_summary_aggregates_in_server_and_enforces_technician_scope(client):
     admin_headers = auth_headers(client)
     created_report = client.post("/api/v1/reports", json=report_payload(), headers=admin_headers)
@@ -241,17 +261,81 @@ def test_dashboard_summary_aggregates_in_server_and_enforces_technician_scope(cl
     assert own.get_json()["data"]["summary"]["total_records"] == 0
 
 
+def test_dashboard_web_exports_share_filters_format_and_permissions(client):
+    """Excel/CSV reutilizan el Dashboard y nunca amplían el alcance del técnico."""
+    admin_headers = auth_headers(client)
+    created = client.post(
+        "/api/v1/reports", json=report_payload(service_type="Predictiva", description="Inspección de ñandú"), headers=admin_headers
+    )
+    assert created.status_code == 201
+    fuel_payload = {
+        "loaded_at": "2026-09-14T10:30:00-03:00", "observations": "Revisión con á, é y ñ",
+        "generators": [{"number": 1, "liters": 10.5, "hourmeter": 100}, {"number": 2, "liters": 20, "hourmeter": 200}],
+    }
+    images = {"payload": json.dumps(fuel_payload)}
+    for name in ("water_1", "oil_1", "water_2", "oil_2"):
+        images[name] = (io.BytesIO(b"png"), f"{name}.png")
+    assert client.post("/api/v1/fuel-loads", headers=admin_headers, data=images, content_type="multipart/form-data").status_code == 201
+
+    with client.session_transaction() as web_session:
+        web_session.update({"user_id": 1, "user_name": "Admin", "role": "Administrador"})
+    filters = "record_type=maintenance&technician_id=1&area_id=1&section_id=1&machinery_id=1&service_type=Predictiva&date_from=2026-09-14&date_to=2026-09-14"
+    dashboard_page = client.get(f"/dashboard?{filters}")
+    assert dashboard_page.status_code == 200
+    assert b"Exportar" in dashboard_page.data
+    assert b"dashboard/export" in dashboard_page.data
+    xlsx = client.get(f"/dashboard/export?format=xlsx&{filters}")
+    assert xlsx.status_code == 200
+    assert xlsx.headers["Content-Type"].startswith("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    assert "attachment;" in xlsx.headers["Content-Disposition"]
+    workbook = load_workbook(io.BytesIO(xlsx.data), data_only=True)
+    assert workbook.sheetnames == ["Resumen", "Reportes", "Cargas de petróleo"]
+    assert workbook["Resumen"]["B14"].value == 1  # Total de registros con los filtros combinados.
+    assert workbook["Reportes"].max_row == 2
+    assert workbook["Reportes"]["I2"].value == "Predictiva"
+    assert "ñandú" in workbook["Reportes"]["J2"].value
+    assert workbook["Cargas de petróleo"].max_row == 1
+
+    all_xlsx = load_workbook(io.BytesIO(client.get("/dashboard/export?format=xlsx&record_type=all&technician_id=1").data), data_only=True)
+    assert all_xlsx["Cargas de petróleo"].max_row == 2
+    assert isinstance(all_xlsx["Cargas de petróleo"]["E2"].value, float)
+    assert all_xlsx["Cargas de petróleo"]["I2"].value == "Revisión con á, é y ñ"
+
+    csv_response = client.get("/dashboard/export?format=csv&record_type=all&technician_id=1")
+    assert csv_response.status_code == 200
+    assert csv_response.headers["Content-Type"].startswith("text/csv")
+    assert "attachment;" in csv_response.headers["Content-Disposition"]
+    assert csv_response.data.startswith(b"\xef\xbb\xbf")
+    assert "Inspección de ñandú" in csv_response.data.decode("utf-8-sig")
+    assert "Carga de petróleo" in csv_response.data.decode("utf-8-sig")
+
+    empty = client.get("/dashboard/export?format=xlsx&record_type=maintenance&technician_id=2")
+    assert empty.status_code == 200
+    assert load_workbook(io.BytesIO(empty.data))["Reportes"].max_row == 1
+
+    with client.session_transaction() as web_session:
+        web_session.update({"user_id": 2, "user_name": "Tech", "role": "Técnico/Operativo"})
+    forbidden = client.get("/dashboard/export?format=csv&technician_id=1")
+    assert forbidden.status_code == 403
+    own = client.get("/dashboard/export?format=csv&technician_id=2")
+    assert own.status_code == 200
+
+
 def test_existing_web_forms_continue_to_use_the_shared_rules(client):
     client.get("/auth/login")
     with client.session_transaction() as session:
         csrf = session["csrf_token"]
     assert client.post("/auth/login", data={"username": "admin@example.test", "password": "CorrectHorseBattery1", "csrf_token": csrf}).status_code == 302
 
-    client.get("/reports/maintenance/new")
+    form_page = client.get("/reports/maintenance/new")
+    assert form_page.status_code == 200
+    for service_type in ("Correctiva", "Preventiva", "Predictiva", "Nueva instalación", "Otro"):
+        assert service_type.encode("utf-8") in form_page.data
+    assert b"Mantenimiento Preventivo" not in form_page.data
     with client.session_transaction() as session:
         csrf = session["csrf_token"]
     report_form = {
-        "csrf_token": csrf, "client": "Maltexco", "service_type": "Inspección", "description": "Formulario web",
+        "csrf_token": csrf, "client": "Maltexco", "service_type": "Nueva instalación", "description": "Formulario web",
         "area_id": "1", "section_id": "1", "machinery_id": "1",
         "task_started_at": "2026-09-14T08:00", "task_finished_at": "2026-09-14T09:00",
     }

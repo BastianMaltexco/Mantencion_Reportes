@@ -277,7 +277,7 @@ class _CreateMaintenanceReportPageState
                       isExpanded: true,
                       initialValue: _serviceType,
                       decoration: const InputDecoration(
-                        labelText: 'Tipo de servicio',
+                        labelText: 'Tipo de mantención',
                       ),
                       items: serviceTypes
                           .map(

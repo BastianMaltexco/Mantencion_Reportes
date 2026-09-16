@@ -221,7 +221,7 @@ class _Filters extends ConsumerWidget {
         DropdownButtonFormField<String>(
           isExpanded: true,
           initialValue: filters.serviceType,
-          decoration: const InputDecoration(labelText: 'Servicio'),
+          decoration: const InputDecoration(labelText: 'Tipo de mantención'),
           hint: const Text('Todos'),
           items: serviceTypes
               .map(

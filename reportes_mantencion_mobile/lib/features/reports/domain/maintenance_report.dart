@@ -1,8 +1,9 @@
 const serviceTypes = <String>[
-  'Mantenimiento Preventivo',
-  'Correctivo',
-  'Inspección',
-  'Instalación',
+  'Correctiva',
+  'Preventiva',
+  'Predictiva',
+  'Nueva instalación',
+  'Otro',
 ];
 
 const checklistAnswers = <String>['Si', 'No', 'No aplica'];

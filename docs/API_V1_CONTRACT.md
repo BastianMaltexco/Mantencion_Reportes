@@ -106,6 +106,16 @@ mantención. Administradores pueden filtrar técnicos; un Técnico queda forzado
 por Flask a sus propios registros y un `technician_id` ajeno recibe
 `403 insufficient_role`.
 
+## Exportación web del Dashboard
+
+La interfaz web usa `GET /dashboard/export?format=xlsx|csv` con los mismos
+parámetros del Dashboard. El archivo se genera en memoria, no se publica en
+Azure Blob y aplica la misma autorización del Dashboard: un técnico queda
+forzado a sus propios datos incluso si altera `technician_id` manualmente.
+
+El XLSX contiene las hojas `Resumen`, `Reportes` y `Cargas de petróleo`; el
+CSV es una vista plana UTF-8 con BOM para Excel.
+
 ## Creación - implementado
 
 `POST /reports` y `POST /fuel-loads` requieren Bearer JWT y asignan el técnico

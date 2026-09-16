@@ -22,7 +22,9 @@ MIME_BY_EXTENSION = {
     "docx": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
     "xls": {"application/vnd.ms-excel"}, "xlsx": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
 }
-SERVICE_TYPES = ("Mantenimiento Preventivo", "Correctivo", "Inspección", "Instalación")
+# Valores válidos únicamente para reportes nuevos. Los valores históricos se
+# mantienen legibles en la base y en el Dashboard, pero no se vuelven a ofrecer.
+SERVICE_TYPES = ("Correctiva", "Preventiva", "Predictiva", "Nueva instalación", "Otro")
 CHECKLIST = (
     ("libre_obstrucciones", "Libre de elementos que pueden obstruir el trabajo?", "No"),
     ("componentes_mal_estado", "Piezas o componentes en mal estado?", "Si"),
