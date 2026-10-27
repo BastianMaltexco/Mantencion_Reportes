@@ -11,6 +11,7 @@ from werkzeug.security import generate_password_hash
 
 from app import create_app, db
 from app.models import Area, Machinery, Section, User
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 
 class TestConfig:
@@ -87,6 +88,34 @@ def test_login_me_refresh_rotation_and_logout(client):
     assert logout.status_code == 200
     revoked = client.post("/api/v1/auth/refresh", json={"refresh_token": new_tokens["refresh_token"]})
     assert revoked.status_code == 401
+
+
+def test_reverse_proxy_prefix_is_opt_in_and_generates_prefixed_urls():
+    """Apache puede publicar bajo una ruta sin confiar headers por defecto."""
+    class ReverseProxyConfig(TestConfig):
+        PROXY_FIX_X_FOR = 1
+        PROXY_FIX_X_PROTO = 1
+        PROXY_FIX_X_HOST = 0
+        PROXY_FIX_X_PREFIX = 1
+
+    app = create_app(ReverseProxyConfig)
+    assert isinstance(app.wsgi_app, ProxyFix)
+
+    @app.get("/_proxy-url-test")
+    def proxy_url_test():
+        from flask import url_for
+        return url_for("healthz")
+
+    response = app.test_client().get(
+        "/_proxy-url-test",
+        headers={
+            "X-Forwarded-For": "127.0.0.1",
+            "X-Forwarded-Proto": "http",
+            "X-Forwarded-Prefix": "/php/reportes_mantencion",
+        },
+    )
+    assert response.status_code == 200
+    assert response.get_data(as_text=True) == "/php/reportes_mantencion/healthz"
 
 
 def test_errors_and_roles_use_the_uniform_envelope(client):

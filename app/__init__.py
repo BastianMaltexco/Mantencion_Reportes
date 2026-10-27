@@ -7,6 +7,7 @@ from flask import Flask, abort, flash, redirect, request, session, url_for
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
 from werkzeug.security import generate_password_hash
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import Config
 
@@ -57,6 +58,20 @@ def validate_csrf():
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
+
+    # Solo se confían los encabezados que se habiliten de manera explícita en
+    # producción. Esto permite publicar la aplicación debajo de
+    # /php/reportes_mantencion sin romper url_for(), enlaces estáticos ni
+    # redirecciones, manteniendo seguros los entornos sin proxy.
+    proxy_fix_options = {
+        "x_for": app.config.get("PROXY_FIX_X_FOR", 0),
+        "x_proto": app.config.get("PROXY_FIX_X_PROTO", 0),
+        "x_host": app.config.get("PROXY_FIX_X_HOST", 0),
+        "x_prefix": app.config.get("PROXY_FIX_X_PREFIX", 0),
+    }
+    if any(proxy_fix_options.values()):
+        app.wsgi_app = ProxyFix(app.wsgi_app, **proxy_fix_options)
+
     if not app.config["SQLALCHEMY_DATABASE_URI"]:
         raise RuntimeError("Falta DATABASE_URL. Cree .env desde .env.example.")
     Path(app.config["UPLOAD_FOLDER"]).mkdir(parents=True, exist_ok=True)

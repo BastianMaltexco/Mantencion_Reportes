@@ -48,6 +48,15 @@ class Config:
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true"
+
+    # Apache local actúa como proxy inverso. Por defecto no se confía en ningún
+    # encabezado X-Forwarded-*, evitando que un cliente externo pueda falsificar
+    # esquema, host o prefijo. En el servidor Windows se habilitan explícitamente
+    # estos valores porque Waitress queda limitado a 127.0.0.1.
+    PROXY_FIX_X_FOR = int(os.environ.get("PROXY_FIX_X_FOR", "0"))
+    PROXY_FIX_X_PROTO = int(os.environ.get("PROXY_FIX_X_PROTO", "0"))
+    PROXY_FIX_X_HOST = int(os.environ.get("PROXY_FIX_X_HOST", "0"))
+    PROXY_FIX_X_PREFIX = int(os.environ.get("PROXY_FIX_X_PREFIX", "0"))
     ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
     ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
 

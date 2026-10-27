@@ -1,0 +1,25 @@
+# Configuración para C:\xampp\apache\conf\extra\httpd-proxy.conf
+#
+# Requisito: habilitar una vez en C:\xampp\apache\conf\httpd.conf:
+# LoadModule proxy_http_module modules/mod_proxy_http.so
+#
+# La IP pública 181.190.38.99:8090 ya se redirige por NAT al Apache local :80.
+# No agregue un Listen ni cambie puertos: este bloque publica únicamente la ruta
+# /php/reportes_mantencion/ y conserva intactas las aplicaciones PHP existentes.
+
+ProxyRequests Off
+ProxyPreserveHost On
+
+# La barra final es importante: Apache elimina el prefijo público antes de
+# reenviar la petición a Waitress, que escucha solo en localhost.
+ProxyPass        "/php/reportes_mantencion/" "http://127.0.0.1:8010/" retry=0 timeout=120
+ProxyPassReverse "/php/reportes_mantencion/" "http://127.0.0.1:8010/"
+
+# Flask usa estos encabezados mediante Werkzeug ProxyFix, habilitado solo en
+# el .env del servidor. No exponga Waitress en la red para que nadie pueda
+# falsificarlos directamente.
+RequestHeader set X-Forwarded-Proto "http"
+RequestHeader set X-Forwarded-Prefix "/php/reportes_mantencion"
+
+# Compatibilidad con accesos que omitan la barra final.
+RedirectMatch 302 ^/php/reportes_mantencion$ /php/reportes_mantencion/
